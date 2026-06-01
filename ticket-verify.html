@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify Ticket</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .verify-card {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 12px 24px;
+            border-radius: 50px;
+            font-weight: 700;
+            font-size: 1.1rem;
+            margin: 20px 0;
+        }
+        .status-valid {
+            background: #d4edda;
+            color: #155724;
+            border: 2px solid #28a745;
+        }
+        .status-used {
+            background: #fff3cd;
+            color: #856404;
+            border: 2px solid #ffc107;
+        }
+        .status-invalid {
+            background: #f8d7da;
+            color: #721c24;
+            border: 2px solid #f5c6cb;
+        }
+        .ticket-info {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        .ticket-info p {
+            margin: 10px 0;
+            font-size: 1.1rem;
+        }
+        .ticket-info strong {
+            color: #667eea;
+        }
+        .icon-large {
+            font-size: 3rem;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="verify-card">
+        <div class="text-center">
+            <div class="icon-large" id="statusIcon">🔍</div>
+            <h1>Ticket Verification</h1>
+        </div>
+
+        <div id="loading" class="text-center">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Verifying...</span>
+            </div>
+            <p class="mt-3">Verifying ticket...</p>
+        </div>
+
+        <div id="result" style="display:none;">
+            <div class="text-center">
+                <div id="statusBadge" class="status-badge"></div>
+            </div>
+
+            <div class="ticket-info">
+                <p><strong>Ticket ID:</strong> <span id="ticketID">N/A</span></p>
+                <p><strong>Name:</strong> <span id="ticketName">N/A</span></p>
+                <p><strong>Event:</strong> <span id="ticketEvent">N/A</span></p>
+                <p><strong>Quantity:</strong> <span id="ticketQty">N/A</span></p>
+                <p><strong>Amount:</strong> ₦<span id="ticketAmount">0</span></p>
+            </div>
+
+            <div id="actionContainer" class="text-center" style="display:none;">
+                <button id="markUsedBtn" class="btn btn-success btn-lg">
+                    ✓ Mark as Used / Verified
+                </button>
+            </div>
+
+            <p class="text-center text-muted mt-3" id="message"></p>
+        </div>
+
+        <p class="text-center text-muted mt-4 small">
+            EventX Ticket Verification System
+        </p>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js"></script>
+    <script type="module">
+        import { db } from "./js/firebase.js";
+        import { ref, get, update } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+        const params = new URLSearchParams(window.location.search);
+        const ticketID = params.get("ticket");
+        const loadingDiv = document.getElementById("loading");
+        const resultDiv = document.getElementById("result");
+        const statusIcon = document.getElementById("statusIcon");
+        const statusBadge = document.getElementById("statusBadge");
+        const message = document.getElementById("message");
+        const actionContainer = document.getElementById("actionContainer");
+        const markUsedBtn = document.getElementById("markUsedBtn");
+
+        async function verifyTicket() {
+            if (!ticketID) {
+                showError("❌", "No ticket provided", "status-invalid");
+                return;
+            }
+
+            try {
+                const snapshot = await get(ref(db, "orders/" + ticketID));
+
+                if (!snapshot.exists()) {
+                    showError("❌", "Ticket not found", "status-invalid");
+                    return;
+                }
+
+                const ticket = snapshot.val();
+
+                document.getElementById("ticketID").textContent = ticketID;
+                document.getElementById("ticketName").textContent = ticket.fullName || "N/A";
+                document.getElementById("ticketEvent").textContent = ticket.event || "N/A";
+                document.getElementById("ticketQty").textContent = ticket.quantity || "N/A";
+                document.getElementById("ticketAmount").textContent = (ticket.totalAmount || 0).toLocaleString();
+
+                loadingDiv.style.display = "none";
+                resultDiv.style.display = "block";
+
+                if (ticket.used) {
+                    statusIcon.textContent = "🎫";
+                    statusBadge.textContent = "ALREADY USED";
+                    statusBadge.className = "status-badge status-used";
+                    message.textContent = "This ticket has already been verified/used.";
+                } else {
+                    statusIcon.textContent = "✅";
+                    statusBadge.textContent = "VALID & UNUSED";
+                    statusBadge.className = "status-badge status-valid";
+                    message.textContent = "This ticket is valid and ready for entry.";
+                    actionContainer.style.display = "block";
+
+                    markUsedBtn.addEventListener("click", async () => {
+                        markUsedBtn.disabled = true;
+                        markUsedBtn.textContent = "Marking as used...";
+
+                        try {
+                            await update(ref(db, "orders/" + ticketID), {
+                                used: true,
+                                usedAt: Date.now()
+                            });
+
+                            statusIcon.textContent = "🎫";
+                            statusBadge.textContent = "NOW MARKED USED";
+                            statusBadge.className = "status-badge status-used";
+                            message.textContent = "Ticket has been marked as used for entry.";
+                            actionContainer.style.display = "none";
+                        } catch (err) {
+                            console.error(err);
+                            alert("Failed to mark ticket as used");
+                            markUsedBtn.disabled = false;
+                            markUsedBtn.textContent = "✓ Mark as Used / Verified";
+                        }
+                    });
+                }
+            } catch (err) {
+                console.error(err);
+                showError("❌", "Error verifying ticket", "status-invalid");
+            }
+        }
+
+        function showError(icon, text, statusClass) {
+            statusIcon.textContent = icon;
+            statusBadge.textContent = text;
+            statusBadge.className = "status-badge " + statusClass;
+            loadingDiv.style.display = "none";
+            resultDiv.style.display = "block";
+        }
+
+        verifyTicket();
+    </script>
+</body>
+</html>
