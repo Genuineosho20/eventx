@@ -240,84 +240,129 @@ let qty = Number(document.getElementById("quantity").value);
 
 let amount = qty * selectedEvent.price;
 
-let handler = PaystackPop.setup({
-key: "pk_test_0ad3448ad318f0faaff780498ef985c9229d7d7a",
-email: email,
-amount: amount * 100,
+const handler = PaystackPop.setup({
+    key: "pk_live_39f7516478546caf6e4c2d6b329c5417373b5bd8",
+    email: email,
+    amount: amount * 100,
 
-callback: function() {
+    callback: function (response) {
+        handlePaystackSuccess(response, {
+            name,
+            email,
+            qty,
+            amount,
+        });
+    },
 
-const ticketID =
-"TKT-" + Math.random().toString(36).substring(2, 10).toUpperCase();
-
-// SAFE QR CONTAINER
-let qrContainer = document.getElementById("qrTemp");
-
-if (!qrContainer) {
-qrContainer = document.createElement("div");
-qrContainer.id = "qrTemp";
-qrContainer.style.display = "none";
-document.body.appendChild(qrContainer);
-}
-
-// generate QR with verification link
-const verificationUrl = `${window.location.origin}/event-ticket-system/ticket-verify.html?ticket=${ticketID}`;
-new QRCode(qrContainer, {
-text: verificationUrl,
-width: 200,
-height: 200,
-colorDark: "#000000",
-colorLight: "#ffffff"
-});
-
-setTimeout(() => {
-
-let canvas = qrContainer.querySelector("canvas");
-
-let qrData = canvas ? canvas.toDataURL("image/png") : "";
-
-// update firebase events
-update(ref(db, "events/" + selectedEvent.id), {
-tickets: selectedEvent.tickets - qty,
-sold: (selectedEvent.sold || 0) + qty
-});
-
-// save order to firebase
-set(ref(db, "orders/" + ticketID), {
-fullName: name,
-email: email,
-event: selectedEvent.name,
-ticketID: ticketID,
-quantity: qty,
-totalAmount: amount,
-qrCode: qrData,
-createdAt: Date.now(),
-paymentRef: "paystack_" + Date.now()
-});
-
-// send email
-sendTicketEmail({
-name,
-email,
-event: selectedEvent.name,
-ticketID,
-qty,
-amount,
-qr: qrData
-});
-
-alert("Payment Successful! Ticket sent to email.");
-
-}, 800);
-
-},
-
-onClose: function() {
-alert("Payment cancelled");
-}
-
+    onClose: function () {
+        alert("Payment cancelled");
+    },
 });
 
 handler.openIframe();
+
+async function verifyPaystackPayment(reference, expectedAmount) {
+    const verifyUrl = `/.netlify/functions/verify-payment?reference=${encodeURIComponent(reference)}&amount=${encodeURIComponent(expectedAmount)}`;
+
+    try {
+        const response = await fetch(verifyUrl);
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+            return {
+                success: false,
+                error: result.error || "Payment verification failed.",
+                details: result.details,
+            };
+        }
+
+        return {
+            success: true,
+            data: result.data,
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: error.message || "Network error while verifying payment.",
+        };
+    }
+}
+
+async function handlePaystackSuccess(response, purchase) {
+    const reference = response.reference || response.trxref;
+
+    if (!reference) {
+        alert("Payment reference missing from Paystack response.");
+        return;
+    }
+
+    const verification = await verifyPaystackPayment(reference, purchase.amount * 100);
+
+    if (!verification.success) {
+        console.error("Paystack verification error:", verification);
+        alert("Payment verification failed. Please contact support.");
+        return;
+    }
+
+    if (verification.data.amount !== purchase.amount * 100) {
+        alert("Verified payment amount does not match order amount.");
+        return;
+    }
+
+    const ticketID = "TKT-" + Math.random().toString(36).substring(2, 10).toUpperCase();
+    let qrContainer = document.getElementById("qrTemp");
+
+    if (!qrContainer) {
+        qrContainer = document.createElement("div");
+        qrContainer.id = "qrTemp";
+        qrContainer.style.display = "none";
+        document.body.appendChild(qrContainer);
+    }
+
+    const verificationUrl = `${window.location.origin}/ticket-verify.html?ticket=${ticketID}`;
+    new QRCode(qrContainer, {
+        text: verificationUrl,
+        width: 200,
+        height: 200,
+        colorDark: "#000000",
+        colorLight: "#ffffff",
+    });
+
+    setTimeout(() => {
+        const canvas = qrContainer.querySelector("canvas");
+        const qrData = canvas ? canvas.toDataURL("image/png") : "";
+
+        update(ref(db, "events/" + selectedEvent.id), {
+            tickets: selectedEvent.tickets - purchase.qty,
+            sold: (selectedEvent.sold || 0) + purchase.qty,
+        });
+
+        set(ref(db, "orders/" + ticketID), {
+            fullName: purchase.name,
+            email: purchase.email,
+            event: selectedEvent.name,
+            ticketID: ticketID,
+            quantity: purchase.qty,
+            totalAmount: purchase.amount,
+            qrCode: qrData,
+            createdAt: Date.now(),
+            paymentRef: reference,
+            paystackStatus: verification.data.status,
+        });
+
+        sendTicketEmail({
+            name: purchase.name,
+            email: purchase.email,
+            event: selectedEvent.name,
+            ticketID: ticketID,
+            qty: purchase.qty,
+            amount: purchase.amount,
+            qr: qrData,
+        });
+
+        alert("Payment Successful! Ticket sent to email.");
+    }, 800);
+}
+
 
 };

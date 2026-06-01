@@ -20,7 +20,8 @@ Netlify Deployment — Quick Steps
 
 4) Environment variables
 - If you use any secret keys (Firebase config, EmailJS user id), add them under Site settings → Build & deploy → Environment.
-- In client-side code, prefer storing only public keys; protect sensitive server-side secrets.
+- Add `PAYSTACK_SECRET_KEY` with your Paystack live secret key.
+- In client-side code, keep only public keys. The secret key is used only by the Netlify function.
 
 5) Verify
 - Visit the provided Netlify URL
